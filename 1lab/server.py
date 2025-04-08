@@ -12,6 +12,7 @@ import tempfile
 import json
 import hashlib
 import re
+import operator
 from collections import OrderedDict
 
 
@@ -116,13 +117,65 @@ class SQLParser:
     
 
 class QueryExecutor:
-    def __init__(self, database_path):
-        pass
+    """ВЫполняет SELECT-запросы по csv таблицам."""
+
+    OPERATORS = {
+        '=': operator.eq,
+        '!=': operator.ne,
+        '<': operator.lt,
+        '>': operator.gt,
+        '<=': operator.le,
+        '>=': operator.ge
+    }
+
+    def __init__(self, database_path: str):
+        self.db_path = database_path
 
 
     def execute(self, query_dict: dict) -> list[dict]:
-        pass
+        table_name = query_dict['table']
+        columns = query_dict['columns']
+        condition = query_dict['condition']
 
+        table_dir = os.path.join(self.db_path, table_name)
+        csv_file = os.path.join(table_dir, 'table.csv')
+
+        if not os.path.isfile(csv_file):
+            raise FileNotFoundError(f'Файл таблицы не найден: {csv_file}')
+
+        result = []
+
+        with open(csv_file, mode='r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # применяем условие where
+                if condition:
+                    col = condition['column']
+                    op_str = condition['operator']
+                    value = condition['value']
+
+                    if col not in row:
+                        continue
+
+                    # преобразуем значения к флоату, если можно
+                    row_val = row[col]
+
+                    try: 
+                        row_val = float(row_val)
+                        value = float(value)
+
+                    except ValueError: pass
+
+                    op_func = self.OPERATORS.get(op_str)
+                    if not op_func or not op_func(row_val, value): continue
+
+                # выбираем только нужные колонки
+                if columns == ['*']: filtered = row
+                else: filtered = {col: row[col] for col in columns if col in row}
+
+                result.append(filtered)
+
+        return result
 
 class CacheManager:
     """
@@ -158,9 +211,38 @@ class CacheManager:
 
 
 class DatabaseStructureBuilder:
-    def build(self) -> dict:
-        pass
+    """
+    Строит описание структуры базы данных:
+    таблицы и их колонки.
+    """
+    
+    def __init__(self, database_path: str):
+        self.db_path = database_path
 
+
+    def build(self) -> dict:
+        structure = {}
+
+        if not os.path.isdir(self.db_path):
+            raise FileNotFoundError(f"Путь к базе данных не найден: {self.db_path}")
+
+        for table_name in os.listdir(self.db_path):
+            table_path = os.path.join(self.database_path, table_name)
+            csv_file = os.path.join(table_path, 'table.csv')
+
+            if not os.path.isfile(csv_file): continue # пропускаем, если файла нет
+
+            try:
+                with open(csv_file, mode='r', encoding='utf-8') as f:
+                    reader = csv.reader(f)
+                    headers = next(reader, None)
+                    if headers:
+                        structure[table_name] = headers
+            except Exception as e:
+                # пропускаем некорректные таблицы, но логируем
+                print(f"Ошибка при чтении {csv_file}: {e}")
+
+        return structure
 
 class AuthenticationManager:
     """
