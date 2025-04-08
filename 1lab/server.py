@@ -12,6 +12,7 @@ import tempfile
 import json
 import hashlib
 import re
+from collections import OrderedDict
 
 
 file_handler = logging.FileHandler(filename='tmp.log')
@@ -124,16 +125,36 @@ class QueryExecutor:
 
 
 class CacheManager:
-    def __init__(self, max_size):
-        pass
+    """
+    Кэширует результаты запросов по их хэшам.
+    При переполнении удаляет самый старый элемент (FIFO).
+    """
+
+    def __init__(self, max_size: int = 100):
+        self.max_size = max_size
+        self.cache = OrderedDict()
 
 
-    def get(self, query_hash):
-        pass
+    def get(self, query_hash: str):
+        """
+        Возвращает результат по хэшу запроса или None.
+        """
+        return self.cache.get(query_hash)
 
 
     def set(self, query_hash, result):
-        pass
+        """
+        Сохраянет результат запроса в кэш.
+        Удаляет старейший элемент при переполнении.
+        """
+        if query_hash in self.cache:
+            # обновляем порядок
+            self.cache.move_to_end(query_hash)
+        self.cache[query_hash] = result
+
+        if len(self.cache) > self.max_size:
+            # удаляем первый (самый старый)
+            self.cache.popitem(last=False) 
 
 
 class DatabaseStructureBuilder:
