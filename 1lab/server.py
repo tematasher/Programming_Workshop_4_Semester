@@ -28,7 +28,7 @@ class Server:
 
         # менеджеры
         self.logger = Logger()
-        self.auth_manager = AuthenticationManager('./users.txt')
+        self.auth_manager = AuthenticationManager(r'D:\code_files\Programming_Workshop_4_Semester\1lab\data\users.json', self.logger)
         self.cache_manager = CacheManager(max_size=50)
         self.query_executor = QueryExecutor(database_path=self.db_path)
         self.db_structure_builder = DatabaseStructureBuilder(database_path=self.db_path)
@@ -58,7 +58,9 @@ class Server:
                     addr=addr,
                     database_manager=self.db_structure_builder,
                     auth_manager=self.auth_manager,
-                    logger=self.logger
+                    logger=self.logger,
+                    cache_manager=self.cache_manager,
+                    query_executor=self.query_executor
                 )
                 thread = threading.Thread(target=handler.handle, daemon=True)
                 thread.start()
@@ -79,12 +81,24 @@ class ClientHandler:
     отправка ответа.
     """
 
-    def __init__(self, conn, addr, database_manager, auth_manager, logger):
+    def __init__(
+            self, 
+            conn, 
+            addr, 
+            database_manager,
+            auth_manager,
+            logger,
+            cache_manager,
+            query_executor
+        ):
         self.conn = conn
         self.addr = addr
         self.db_manager = database_manager
         self.auth_manager = auth_manager
         self.logger = logger
+        self.cache_manager = cache_manager
+        self.query_executor = query_executor
+
 
     def recv_message(self) -> str:
         """
@@ -152,14 +166,14 @@ class ClientHandler:
                     parsed = SQLParser().parse(msg)
                     query_hash = hashlib.md5(msg.encode()).hexdigest()
 
-                    cached = CacheManager.get(query_hash)
+                    cached = self.cache_manager.get(query_hash)
                     if cached is not None:
                         self.logger.log("INFO", f"Запрос из кэша для {self.addr}")
                         self.send_message(json.dumps({"status": "ok", "cached": True, "result": cached}))
                         continue
 
-                    result = QueryExecutor.execute(parsed)
-                    CacheManager.set(query_hash, result)
+                    result = self.query_executor.execute(parsed)
+                    self.cache_manager.set(query_hash, result)
 
                     self.send_message(json.dumps({"status": "ok", "cached": False, "result": result}))
 
@@ -338,7 +352,7 @@ class DatabaseStructureBuilder:
             raise FileNotFoundError(f"Путь к базе данных не найден: {self.db_path}")
 
         for table_name in os.listdir(self.db_path):
-            table_path = os.path.join(self.database_path, table_name)
+            table_path = os.path.join(self.db_path, table_name)
             csv_file = os.path.join(table_path, 'table.csv')
 
             if not os.path.isfile(csv_file): continue # пропускаем, если файла нет
@@ -373,13 +387,13 @@ class AuthenticationManager:
             try:
                 with open(self.users_file, 'r', encoding='utf-8') as f:
                     self.users = json.load(f)
-                self.logger.info(f"[Auth] Загружены {len(self.users)} пользователей.")
+                self.logger.log('INFO', f"[Auth] Загружены {len(self.users)} пользователей.")
 
             except Exception as e:
-                self.logger.error(f"[Auth] Ошибка при чтении файла пользователей: {e}")
+                self.logger.log('ERROR', f"[Auth] Ошибка при чтении файла пользователей: {e}")
             
         else:
-            self.logger.warning(f"[Auth] Файл пользователей не найден: {self.users_file}")
+            self.logger.log('WARNING', f"[Auth] Файл пользователей не найден: {self.users_file}")
 
 
     def authenticate(self, username: str, password: str) -> bool:
