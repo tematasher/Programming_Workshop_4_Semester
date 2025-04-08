@@ -12,20 +12,6 @@ import operator
 from collections import OrderedDict
 
 
-file_handler = logging.FileHandler(filename='tmp.log')
-stdout_handler = logging.StreamHandler(stream=sys.stdout)
-handlers = [stdout_handler]
-# handlers = [file_handler, stdout_handler]
-
-logging.basicConfig(
-    level=logging.DEBUG, 
-    format='[%(asctime)s] %(name)s - %(message)s',
-    handlers=handlers
-)
-
-import socket
-import threading
-
 class Server:
     """
     Основной сервер. Ожидает подключения клиентов,
