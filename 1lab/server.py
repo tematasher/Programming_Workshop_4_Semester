@@ -11,6 +11,7 @@ import sys
 import tempfile
 import json
 import hashlib
+import re
 
 
 file_handler = logging.FileHandler(filename='tmp.log')
@@ -60,9 +61,58 @@ class ClientHandler:
 
 
 class SQLParser:
-     def parse(self, raw_query: str) -> dict:
-        pass
-     
+    """
+    Парсит SQL-подобные запросы вида:
+    SELECT col1, col2 FROM table WHERE col3 >= 10
+    """
+
+    SUPPORTED_OPERATORS = ['>=', '<=', '!=', '=', '<', '>']
+
+    def parse(self, raw_query: str) -> dict:
+        query = raw_query.strip().lower()
+        pattern = r'^select\s+(?P<columns>[\*\w,\s]+)\s+from\s+(?P<table>\w+)(?:\s+where\s+(?P<condition>.+))?$'
+        match = re.match(pattern, query)
+
+        if not match: raise ValueError('Неверный формат запроса.')
+
+        columns = [col.strip() for col in match.group('columns').split(',')]
+        table = match.group('table')
+        raw_condition = match.group('condition')
+
+        condition = None
+        if raw_condition:
+            condition = self._parse_condition(raw_condition)
+        
+        return {
+            'table': table,
+            'columns': columns,
+            'condition': condition
+        }
+    
+
+    def _parse_condition(self, condition_str: str) -> dict:
+        for op in self.SUPPORTED_OPERATORS:
+            if op in condition_str:
+                parts = condition_str.split(op)
+                if len(parts) != 2:
+                    raise ValueError('Неверное условие WHERE.')
+                
+                column = parts[0].strip()
+                value = parts[1].strip().strip("'\'")
+
+                if value.isdigit():
+                    value = int(value)
+                else:
+                    try: value = float(value)
+                    except ValueError: pass
+
+                return {
+                    'column': column,
+                    'operator': op,
+                    'value': value
+                }
+        raise ValueError('Неизвестный оператор в WHERE-условии.')
+    
 
 class QueryExecutor:
     def __init__(self, database_path):
