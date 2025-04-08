@@ -1,14 +1,10 @@
 import socket
 import struct
-import select
-import asyncio
 import threading
 import logging
-import scapy
 import os
 import csv
 import sys
-import tempfile
 import json
 import hashlib
 import re
@@ -27,39 +23,168 @@ logging.basicConfig(
     handlers=handlers
 )
 
+import socket
+import threading
+
 class Server:
     """
-    Запуск сервера, приём клиентов, делегирование
-    их обработки. Делегирует соединение в ClientHandler.
+    Основной сервер. Ожидает подключения клиентов,
+    запускает обработку в ClientHandler.
     """
-    def __init__(self, database_path='./data', host='localhost', port='7777'):
+
+    def __init__(self, database_path='./data', host='localhost', port=7777):
         self.host = host
         self.port = port
         self.db_path = database_path
-        self.server_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
 
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        # менеджеры
+        self.logger = Logger()
+        self.auth_manager = AuthenticationManager('./users.txt')
+        self.cache_manager = CacheManager(max_size=50)
+        self.query_executor = QueryExecutor(database_path=self.db_path)
+        self.db_structure_builder = DatabaseStructureBuilder(database_path=self.db_path)
+
+        self.running = True
 
     def start(self):
-        self.server_socket.bind((self.host, self.port))
-        self.server_socket.listen(1)
-        client, addr = self.server_socket.accept()
-
+        try:
+            self.server_socket.bind((self.host, self.port))
+            self.server_socket.listen(5)
+            self.logger.log("INFO", f"Сервер запущен на {self.host}:{self.port}")
+            self.accept_connections()
+        except Exception as e:
+            self.logger.log("ERROR", f"Ошибка запуска сервера: {e}")
+        finally:
+            self.shutdown()
 
     def accept_connections(self):
-        pass
+        while self.running:
+            try:
+                conn, addr = self.server_socket.accept()
+                self.logger.log("INFO", f"Подключение клиента: {addr}")
 
-    
+                # создаём отдельный поток под клиента
+                handler = ClientHandler(
+                    conn=conn,
+                    addr=addr,
+                    database_manager=self.db_structure_builder,
+                    auth_manager=self.auth_manager,
+                    logger=self.logger
+                )
+                thread = threading.Thread(target=handler.handle, daemon=True)
+                thread.start()
+
+            except Exception as e:
+                self.logger.log("ERROR", f"Ошибка при обработке клиента: {e}")
+
     def shutdown(self):
-        pass
+        self.logger.log("INFO", "Завершение работы сервера...")
+        self.server_socket.close()
+
 
 
 class ClientHandler:
-    def __init__(self, conn, addr, database_manager, auth_manager, logger):
-        pass
+    """
+    Обрабатывает одно соединение с клиентом:
+    аутентификация, парсинг и выполнение запроса,
+    отправка ответа.
+    """
 
-        
+    def __init__(self, conn, addr, database_manager, auth_manager, logger):
+        self.conn = conn
+        self.addr = addr
+        self.db_manager = database_manager
+        self.auth_manager = auth_manager
+        self.logger = logger
+
+    def recv_message(self) -> str:
+        """
+        Принимает сообщение от клиента с префиксом длины (4 байта).
+        """
+        raw_length = self.conn.recv(4)
+        if not raw_length:
+            return None
+        length = struct.unpack('!I', raw_length)[0]
+        data = b''
+        while len(data) < length:
+            packet = self.conn.recv(length - len(data))
+            if not packet:
+                break
+            data += packet
+        return data.decode('utf-8')
+
+    def send_message(self, message: str):
+        """
+        Отправляет сообщение клиенту с заголовком какой-то длины.
+        """
+        encoded = message.encode('utf-8')
+        length = struct.pack('!I', len(encoded))
+        self.conn.sendall(length + encoded)
+
     def handle(self):
-        pass
+        try:
+            self.logger.log("INFO", f"Клиент подключен: {self.addr}")
+
+            # аутентификация
+            auth_data = self.recv_message()
+            if not auth_data:
+                self.logger.log("ERROR", f"Не удалось получить аутентификационные данные")
+                self.conn.close()
+                return
+
+            credentials = json.loads(auth_data)
+            username = credentials.get('username')
+            password = credentials.get('password')
+
+            if not self.auth_manager.authenticate(username, password):
+                self.logger.log("WARNING", f"Аутентификация не удалась для {username}")
+                self.send_message(json.dumps({"status": "error", "message": "Authentication failed"}))
+                self.conn.close()
+                return
+
+            self.send_message(json.dumps({"status": "ok", "message": "Authenticated"}))
+
+            # основной цикл обработки команд
+            while True:
+                msg = self.recv_message()
+                if not msg:
+                    break
+
+                if msg.strip().upper() == "EXIT":
+                    break
+
+                if msg.strip().upper() == "GET_STRUCTURE":
+                    structure = self.db_manager.build()
+                    self.send_message(json.dumps({"status": "ok", "structure": structure}))
+                    continue
+
+                # SELECT обработка
+                try:
+                    parsed = SQLParser().parse(msg)
+                    query_hash = hashlib.md5(msg.encode()).hexdigest()
+
+                    cached = CacheManager.get(query_hash)
+                    if cached is not None:
+                        self.logger.log("INFO", f"Запрос из кэша для {self.addr}")
+                        self.send_message(json.dumps({"status": "ok", "cached": True, "result": cached}))
+                        continue
+
+                    result = QueryExecutor.execute(parsed)
+                    CacheManager.set(query_hash, result)
+
+                    self.send_message(json.dumps({"status": "ok", "cached": False, "result": result}))
+
+                except Exception as e:
+                    self.logger.log("ERROR", f"Ошибка при выполнении запроса: {e}")
+                    self.send_message(json.dumps({"status": "error", "message": str(e)}))
+
+        finally:
+            self.logger.log("INFO", f"Клиент отключен: {self.addr}")
+            self.conn.close()
+
 
 
 class SQLParser:
