@@ -348,6 +348,7 @@ class DatabaseStructureBuilder:
                     reader = csv.reader(f)
                     headers = next(reader, None)
                     if headers:
+                        print(f"Найдена таблица: {entry}")
                         structure[table_name] = headers
             except Exception as e:
                 # пропускаем некорректные таблицы, но логируем
