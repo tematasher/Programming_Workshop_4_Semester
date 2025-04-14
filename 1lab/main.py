@@ -1,24 +1,25 @@
-import sys
-
+import threading
+import time
 from server import Server
 from client import Client
 
-def main():
-    if len(sys.argv) < 2:
-        print("Использование:")
-        print("  python main.py --server     # Запустить сервер")
-        print("  python main.py --client     # Запустить клиент")
-        sys.exit(1)
 
-    if sys.argv[1] == '--server':
-        server = Server()
-        server.start()
-    elif sys.argv[1] == '--client':
-        client = Client()
-        client.run()
-    else:
-        print("Неизвестный аргумент:", sys.argv[1])
-        print("Допустимые аргументы: --server, --client")
+def run_server():
+    Server().start()
+
+
+def run_client():
+    Client().run()
+
 
 if __name__ == '__main__':
-    main()
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+
+    print("[MAIN] Сервер запускается...")
+    time.sleep(2)
+
+    run_client()
+
+    # ожидание завершения всех потоков
+    server_thread.join(timeout=1)

@@ -23,6 +23,10 @@ class Server:
         self.port = port
         self.db_path = database_path
 
+        # создаём папку data, если её нет
+        if not os.path.exists(database_path):
+            os.makedirs(database_path)
+        
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
@@ -152,13 +156,50 @@ class ClientHandler:
                 msg = self.recv_message()
                 if not msg:
                     break
+                
+                # попытка обработать как JSON-команду
+                try:
+                    data = json.loads(msg)
+                    if data.get('command') == 'ADD_USER':
+                        new_username = data.get('username')
+                        new_password = data.get('password')
+                        success = self.auth_manager.add_user(new_username, new_password)
+                        if success:
+                            self.send_message(json.dumps({"status": "ok", "message": f"Пользователь {new_username} добавлен."}))
+                        else:
+                            self.send_message(json.dumps({"status": "error", "message": f"Пользователь {new_username} уже существует."}))
+                        continue
 
+                except json.JSONDecodeError:
+                    pass  # не JSON, продолжаем как SQL-запрос
+
+                query = msg.strip()
                 if msg.strip().upper() == "EXIT":
                     break
 
                 if msg.strip().upper() == "GET_STRUCTURE":
                     structure = self.db_manager.build()
                     self.send_message(json.dumps({"status": "ok", "structure": structure}))
+                    continue
+                
+                if msg.strip().upper().startswith("ADD_USER"):
+                    try:
+                        parts = msg.strip().split()
+                        if len(parts) != 3:
+                            raise ValueError("Формат: ADD_USER username password")
+
+                        new_username = parts[1]
+                        new_password = parts[2]
+
+                        success = self.auth_manager.add_user(new_username, new_password)
+                        if success:
+                            self.send_message(json.dumps({"status": "ok", "message": f"Пользователь {new_username} добавлен."}))
+                        else:
+                            self.send_message(json.dumps({"status": "error", "message": f"Пользователь {new_username} уже существует."}))
+
+                    except Exception as e:
+                        self.logger.log("ERROR", f"Ошибка при добавлении пользователя: {e}")
+                        self.send_message(json.dumps({"status": "error", "message": str(e)}))
                     continue
 
                 # SELECT обработка
