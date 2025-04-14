@@ -24,8 +24,8 @@ class Server:
         self.db_path = database_path
 
         # создаём папку data, если её нет
-        if not os.path.exists(database_path):
-            os.makedirs(database_path)
+        if not os.path.exists(self.db_path):
+            os.makedirs(self.db_path)
         
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -165,9 +165,9 @@ class ClientHandler:
                         new_password = data.get('password')
                         success = self.auth_manager.add_user(new_username, new_password)
                         if success:
-                            self.send_message(json.dumps({"status": "ok", "message": f"Пользователь {new_username} добавлен."}))
+                            self.send_message(json.dumps({"status": "ok", "message": "Пользователь добавлен!"}))
                         else:
-                            self.send_message(json.dumps({"status": "error", "message": f"Пользователь {new_username} уже существует."}))
+                            self.send_message(json.dumps({"status": "error", "message": "Ошибка регистрации."}))
                         continue
 
                 except json.JSONDecodeError:
@@ -388,26 +388,27 @@ class DatabaseStructureBuilder:
 
     def build(self) -> dict:
         structure = {}
-
         if not os.path.isdir(self.db_path):
             raise FileNotFoundError(f"Путь к базе данных не найден: {self.db_path}")
-
+        
         for table_name in os.listdir(self.db_path):
-            table_path = os.path.join(self.db_path, table_name)
-            csv_file = os.path.join(table_path, 'table.csv')
-
-            if not os.path.isfile(csv_file): continue # пропускаем, если файла нет
-
+            table_dir = os.path.join(self.db_path, table_name)
+            if not os.path.isdir(table_dir):
+                continue  # пропускаем файлы, только папки
+            
+            csv_file = os.path.join(table_dir, 'table.csv')
+            if not os.path.isfile(csv_file):
+                continue  # пропускаем папки без table.csv
+            
             try:
-                with open(csv_file, mode='r', encoding='utf-8') as f:
+                with open(csv_file, 'r', encoding='utf-8') as f:
                     reader = csv.reader(f)
                     headers = next(reader, None)
                     if headers:
                         structure[table_name] = headers
             except Exception as e:
-                # пропускаем некорректные таблицы, но логируем
                 print(f"Ошибка при чтении {csv_file}: {e}")
-
+        
         return structure
 
 class AuthenticationManager:
@@ -472,11 +473,11 @@ class AuthenticationManager:
         try:
             with open(self.users_file, 'w', encoding='utf-8') as f:
                 json.dump(self.users, f, indent=4)
-            self.logger.info(f'[Auth] Пользователь добавлен: {username}')
+            self.logger.log(f'[Auth] Пользователь добавлен: {username}')
             return True
         
         except Exception as e:
-            self.logger.error(f'[Auth] Ошибка при сохранении пользователя: {e}')
+            self.logger.log(f'[Auth] Ошибка при сохранении пользователя: {e}')
             return False
               
 
