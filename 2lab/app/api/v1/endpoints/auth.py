@@ -5,6 +5,8 @@ from app.schemas.user import UserCreate, User
 from app.schemas.token import Token
 from app.core.security import verify_password, create_access_token
 from app.db.session import get_db
+import logging
+
 
 router = APIRouter()
 
@@ -33,3 +35,23 @@ def login(user: UserCreate, db: Session = Depends(get_db)):
         "email": db_user.email,
         "token": token
     }
+
+logger = logging.getLogger(__name__)
+
+@router.post("/login/", response_model=User)
+def login(user: UserCreate, db: Session = Depends(get_db)):
+    try:
+        db_user = get_user_by_email(db, email=user.email)
+        if not db_user:
+            logger.error(f"User not found: {user.email}")
+            raise HTTPException(...)
+        
+        if not verify_password(user.password, db_user.hashed_password):
+            logger.error(f"Invalid password for: {user.email}")
+            raise HTTPException(...)
+        
+        # ... остальной код ...
+    except Exception as e:
+        logger.exception("Login error")
+        raise
+    

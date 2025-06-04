@@ -1,0 +1,8 @@
+# Терминал 1: Redis
+redis-server
+
+# Терминал 2: Celery worker
+celery -A app.tasks.celery worker --loglevel=info
+
+# Терминал 3: FastAPI
+uvicorn app.main:app --reload --port 8001
