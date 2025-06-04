@@ -1,5 +1,5 @@
 # Терминал 1: Redis
-redis-server
+redis-server.exe
 
 # Терминал 2: Celery worker
 celery -A app.tasks.celery worker --loglevel=info

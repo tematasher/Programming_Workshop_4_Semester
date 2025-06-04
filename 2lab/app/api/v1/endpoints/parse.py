@@ -14,35 +14,34 @@ def parse_website(request: ParseWebsiteRequest):
     )
     return {"task_id": task.id}
 
+
 @router.get("/parse_status/", response_model=ParseStatusResponse)
 def parse_status(task_id: str = Query(..., alias="task_id")):
+    from celery.result import AsyncResult
     task_result = AsyncResult(task_id)
     
-    try:
-        if task_result.ready():
-            result = task_result.result
-            if result and result.get("status") == "completed":
-                return {
-                    "status": "completed",
-                    "progress": 100,
-                    "result": result.get("result")
-                }
-            elif result and result.get("status") == "failed":
-                return {
-                    "status": "failed",
-                    "progress": 0,
-                    "result": result.get("error")
-                }
-        else:
-            # Возвращаем статус в процессе выполнения
-            return {
-                "status": "in_progress",
-                "progress": 50,
-                "result": None
-            }
-    except Exception as e:
+    if task_result.state == 'PENDING':
         return {
-            "status": "error",
+            "status": "pending",
             "progress": 0,
-            "result": str(e)
+            "result": None
+        }
+    elif task_result.state == 'PROGRESS':
+        return {
+            "status": "in_progress",
+            "progress": task_result.info.get('progress', 50),
+            "result": None
+        }
+    elif task_result.state == 'SUCCESS':
+        result = task_result.result
+        return {
+            "status": "completed",
+            "progress": 100,
+            "result": result.get("result")
+        }
+    else:  # FAILURE или другие состояния
+        return {
+            "status": "failed",
+            "progress": 0,
+            "result": str(task_result.info)  # Информация об ошибке
         }

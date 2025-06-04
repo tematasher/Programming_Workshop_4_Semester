@@ -50,7 +50,6 @@ def login(user: UserCreate, db: Session = Depends(get_db)):
             logger.error(f"Invalid password for: {user.email}")
             raise HTTPException(...)
         
-        # ... остальной код ...
     except Exception as e:
         logger.exception("Login error")
         raise
