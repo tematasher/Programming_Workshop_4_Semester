@@ -1,11 +1,10 @@
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from app.schemas.parse import ParseWebsiteRequest, ParseStatusResponse
-from app.tasks.celery import parse_website_task, celery_app, parse_website_task
+from app.tasks.celery import parse_website_task, celery_app
 from celery.result import AsyncResult
 from app.services.parser import WebsiteParser
-from app.models.user import User
-from app.crud.user import get_current_user_ws
-
+from app.models.user import User as DBUser
+from app.core.security import get_current_user_ws
 
 router = APIRouter()
 
@@ -24,8 +23,10 @@ def test_parser(request: ParseWebsiteRequest):
 async def parse_website(
     request: ParseWebsiteRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user_ws),
+    current_user: DBUser = Depends(get_current_user_ws),
 ):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
     task = parse_website_task.delay(
         user_id=current_user.email,
         url=request.url,
@@ -34,17 +35,14 @@ async def parse_website(
     )
     return {"task_id": task.id}
 
-
 @router.get("/parse_status/", response_model=ParseStatusResponse)
 def parse_status(task_id: str):
     task_result = AsyncResult(task_id, app=celery_app)
-    
     response_data = {
         "status": task_result.state,
         "progress": 0,
         "result": None
     }
-    
     if task_result.state == "PROGRESS":
         response_data["progress"] = task_result.info.get("progress", 0)
     elif task_result.state == "SUCCESS":
@@ -55,5 +53,4 @@ def parse_status(task_id: str):
             response_data["result"] = result
         else:
             response_data["result"] = str(result)
-    
     return response_data

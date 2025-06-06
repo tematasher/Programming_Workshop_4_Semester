@@ -23,34 +23,13 @@ def sign_up(user: UserCreate, db: Session = Depends(get_db)):
         "token": token
     }
 
-@router.post("/login/", response_model=User)
+logger = logging.getLogger(__name__)
+
+@router.post("/login/", response_model=Token) 
 def login(user: UserCreate, db: Session = Depends(get_db)):
     db_user = get_user_by_email(db, email=user.email)
     if not db_user or not verify_password(user.password, db_user.hashed_password):
         raise HTTPException(status_code=400, detail="Incorrect email or password")
-    
     token = create_access_token(data={"sub": db_user.email})
-    return {
-        "id": db_user.id,
-        "email": db_user.email,
-        "token": token
-    }
-
-logger = logging.getLogger(__name__)
-
-@router.post("/login/", response_model=User)
-def login(user: UserCreate, db: Session = Depends(get_db)):
-    try:
-        db_user = get_user_by_email(db, email=user.email)
-        if not db_user:
-            logger.error(f"User not found: {user.email}")
-            raise HTTPException(...)
-        
-        if not verify_password(user.password, db_user.hashed_password):
-            logger.error(f"Invalid password for: {user.email}")
-            raise HTTPException(...)
-        
-    except Exception as e:
-        logger.exception("Login error")
-        raise
+    return {"access_token": token, "token_type": "bearer"}
     

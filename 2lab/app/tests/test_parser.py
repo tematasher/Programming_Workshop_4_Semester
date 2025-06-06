@@ -1,6 +1,8 @@
+import os
+import sys
 import pytest
-from app.services.parser import WebsiteParser
 import networkx as nx
+from app.services.parser import WebsiteParser
 
 
 @pytest.fixture
@@ -60,14 +62,12 @@ def test_parser_cyclic_links(mock_requests):
     parser = WebsiteParser("https://example.com", max_depth=3)
     graph = parser.parse()
     
-    # Проверяем отсутствие дубликатов
     assert len(graph.nodes) == 3
-    assert len(graph.edges) == 4  # Все уникальные связи
+    assert len(graph.edges) == 4
 
 def test_parser_external_links(mock_requests):
     parser = WebsiteParser("https://example.com", max_depth=1)
     graph = parser.parse()
     
-    # Проверяем, что внешние ссылки не включаются
     for node in graph.nodes:
         assert node.startswith("https://example.com")

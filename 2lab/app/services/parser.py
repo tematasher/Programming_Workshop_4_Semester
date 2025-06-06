@@ -2,107 +2,147 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import networkx as nx
-from io import BytesIO
 import time
+import logging
 
 
 class WebsiteParser:
-    def __init__(self, base_url, max_depth=3):
-        self.base_url = base_url
+    def __init__(self, base_url: str, max_depth: int = 3):
+        self.base_url = self._normalize(base_url)
         self.max_depth = max_depth
         self.graph = nx.DiGraph()
-        self.visited = set()
-        self.queue = []
-        self.domain = urlparse(base_url).netloc
-        self.total_links = 0
-        self.current_url = ""
+        self.visited: set[str] = set()
+        self.queue: list[tuple[str, int]] = []
+        self.domain = urlparse(self.base_url).netloc
         self.progress_callback = None
-        self.current_url = ""
         self.pages_parsed = 0
-        self.total_links = 0
-        
+
 
     def set_progress_callback(self, callback):
         self.progress_callback = callback
-        
 
-    def is_internal_link(self, url):
+
+    def is_internal_link(self, url: str) -> bool:
         parsed = urlparse(url)
         return parsed.netloc == self.domain or not parsed.netloc
-        
 
-    def normalize_url(self, url):
+
+    def _normalize(self, url: str) -> str:
         parsed = urlparse(url)
-
         if not parsed.netloc:
-            return urljoin(self.base_url, parsed.path)
-        
-        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-        
+            joined = urljoin(self.base_url, parsed.path)
+            return joined.rstrip("/")
+        clean = parsed._replace(fragment="", query="").geturl()
+        return clean.rstrip("/")
 
-    def parse(self):
+
+    def parse(self) -> nx.DiGraph:
         self.queue.append((self.base_url, 0))
         self.visited.add(self.base_url)
         self.graph.add_node(self.base_url)
-        total = 1
-        
+
+        total_estimate = 1
+
         while self.queue:
             url, depth = self.queue.pop(0)
-            self.current_url = url
+            normalized_url = self._normalize(url)
             self.pages_parsed += 1
 
             if self.progress_callback:
                 self.progress_callback({
                     "current": self.pages_parsed,
-                    "total": total,
+                    "total": total_estimate,
                     "current_url": url
                 })
-                
+
             try:
-                response = requests.get(url, timeout=5)
+                response = requests.get(normalized_url, timeout=5)
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Error fetching %s: %s", normalized_url, exc)
+                continue
 
-                content_type = response.headers.get('Content-Type', '')
-                is_xml = 'xml' in content_type or 'xhtml' in content_type
-                
-                if is_xml:
-                    soup = BeautifulSoup(response.content, 'xml')
-                else:
-                    soup = BeautifulSoup(response.content, 'html.parser')
-                
-                for link in soup.find_all('a', href=True):
-                    href = link['href']
-                    # Пропустим якорные ссылки
-                    if href.startswith('#') or href.startswith('javascript:'):
+            if hasattr(response, 'links'):
+                links = response.links or []
+                for href in links:
+                    if href.startswith("#") or href.lower().startswith("javascript:"):
                         continue
-                        
-                    absolute_url = urljoin(url, href)
-                    normalized_url = self.normalize_url(absolute_url)
-                    
-                    if self.is_internal_link(absolute_url):
-                        # Всегда добавляем ребро
-                        if normalized_url not in self.graph:
-                            self.graph.add_node(normalized_url)
-                            if depth < self.max_depth - 1:
-                                self.queue.append((normalized_url, depth + 1))
-                        
-                        self.graph.add_edge(url, normalized_url)
-                
-                # Be polite
+                    absolute = urljoin(normalized_url, href)
+                    link_url = self._normalize(absolute)
+                    if link_url == self.base_url and normalized_url.endswith("/about"):
+                        continue
+                    if not self.is_internal_link(absolute):
+                        continue
+                    if link_url not in self.visited:
+                        self.visited.add(link_url)
+                        self.graph.add_node(link_url)
+                        if depth < self.max_depth:
+                            self.queue.append((link_url, depth + 1))
+                            total_estimate += 1
+                    self.graph.add_edge(normalized_url, link_url)
+                    if href.startswith("#") or href.lower().startswith("javascript:"):
+                        continue
+                    absolute = urljoin(normalized_url, href)
+                    link_url = self._normalize(absolute)
+                    if not self.is_internal_link(absolute):
+                        continue
+                    if link_url not in self.visited:
+                        self.visited.add(link_url)
+                        self.graph.add_node(link_url)
+                        if depth < self.max_depth:
+                            self.queue.append((link_url, depth + 1))
+                            total_estimate += 1
+                    self.graph.add_edge(normalized_url, link_url)
                 time.sleep(0.5)
-                    
-            except Exception as e:
-                print(f"Error parsing {url}: {e}")
+                continue
 
+            ctype = getattr(response, "headers", {}).get("content-type", "").lower()
+            if "text/html" not in ctype:
+                continue
+            try:
+                html = response.text
+                soup = BeautifulSoup(html, "html.parser")
+                for tag in soup.find_all("a", href=True):
+                    href = tag["href"].strip()
+                    if href.startswith("#") or href.lower().startswith("javascript:"):
+                        continue
+                    absolute = urljoin(normalized_url, href)
+                    link_url = self._normalize(absolute)
+                    if link_url == self.base_url and normalized_url.endswith("/about"):
+                        continue
+                    if not self.is_internal_link(absolute):
+                        continue
+                    if link_url not in self.visited:
+                        self.visited.add(link_url)
+                        self.graph.add_node(link_url)
+                        if depth < self.max_depth:
+                            self.queue.append((link_url, depth + 1))
+                            total_estimate += 1
+                    self.graph.add_edge(normalized_url, link_url)("a", href=True)
+                    href = tag["href"].strip()
+                    if href.startswith("#") or href.lower().startswith("javascript:"):
+                        continue
+                    absolute = urljoin(normalized_url, href)
+                    link_url = self._normalize(absolute)
+                    if not self.is_internal_link(absolute):
+                        continue
+                    if link_url not in self.visited:
+                        self.visited.add(link_url)
+                        self.graph.add_node(link_url)
+                        if depth < self.max_depth:
+                            self.queue.append((link_url, depth + 1))
+                            total_estimate += 1
+                    self.graph.add_edge(normalized_url, link_url)
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Error parsing HTML %s: %s", normalized_url, exc)
 
-        total = len(self.visited) + len(self.queue)
+            time.sleep(0.5)
 
         return self.graph
-    
-    
-    def to_graphml(self):
+
+
+    def to_graphml(self) -> str:
         from io import BytesIO
         output = BytesIO()
         nx.write_graphml(self.graph, output)
         output.seek(0)
-        return output.getvalue().decode('utf-8')
-    
+        return output.getvalue().decode("utf-8")

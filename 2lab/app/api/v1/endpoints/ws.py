@@ -11,31 +11,20 @@ router = APIRouter()
 
 
 @router.websocket("/ws")
-async def websocket_endpoint(
-    websocket: WebSocket,
-    token: str,
-):
-    # Получаем сессию базы данных
-    db: Session = next(get_db())
-    
-    # Используем исправленную функцию аутентификации
+async def websocket_endpoint(websocket: WebSocket, token: str, db: Session = Depends(get_db)):
+    await websocket.accept()
     user = await get_current_user_ws(token, db)
-    
     if not user:
         await websocket.close(code=1008)
         return
-    
     await manager.connect(user.email, websocket)
     try:
         while True:
-            # Ожидаем сообщения от клиента (можно использовать для heartbeat)
             data = await websocket.receive_text()
             
-            # Обработка команд от клиента
             try:
                 command = json.loads(data)
                 if command.get("command") == "parse":
-                    # Запуск задачи парсинга
                     task = parse_website_task.delay(
                         user_id=user.email,
                         url=command["url"],
@@ -49,6 +38,9 @@ async def websocket_endpoint(
                     })
             except json.JSONDecodeError:
                 pass
+            
+            except WebSocketDisconnect:
+                await manager.disconnect(user.email, websocket)
                 
     except WebSocketDisconnect:
         manager.disconnect(user.email, websocket)
