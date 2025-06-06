@@ -17,6 +17,9 @@ class WebsiteParser:
         self.total_links = 0
         self.current_url = ""
         self.progress_callback = None
+        self.current_url = ""
+        self.pages_parsed = 0
+        self.total_links = 0
         
 
     def set_progress_callback(self, callback):
@@ -41,15 +44,19 @@ class WebsiteParser:
         self.queue.append((self.base_url, 0))
         self.visited.add(self.base_url)
         self.graph.add_node(self.base_url)
-        processed = 0
+        total = 1
         
         while self.queue:
             url, depth = self.queue.pop(0)
             self.current_url = url
-            processed += 1
+            self.pages_parsed += 1
 
             if self.progress_callback:
-                self.progress_callback(processed, len(self.queue) + processed)
+                self.progress_callback({
+                    "current": self.pages_parsed,
+                    "total": total,
+                    "current_url": url
+                })
                 
             try:
                 response = requests.get(url, timeout=5)
@@ -85,7 +92,10 @@ class WebsiteParser:
                     
             except Exception as e:
                 print(f"Error parsing {url}: {e}")
-        
+
+
+        total = len(self.visited) + len(self.queue)
+
         return self.graph
     
     

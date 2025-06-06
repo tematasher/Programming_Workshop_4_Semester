@@ -4,7 +4,7 @@ from app.tasks.celery import parse_website_task, celery_app, parse_website_task
 from celery.result import AsyncResult
 from app.services.parser import WebsiteParser
 from app.models.user import User
-from app.core.security import get_current_user
+from app.crud.user import get_current_user_ws
 
 
 router = APIRouter()
@@ -24,7 +24,7 @@ def test_parser(request: ParseWebsiteRequest):
 async def parse_website(
     request: ParseWebsiteRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_ws),
 ):
     task = parse_website_task.delay(
         user_id=current_user.email,
@@ -34,37 +34,26 @@ async def parse_website(
     )
     return {"task_id": task.id}
 
+
 @router.get("/parse_status/", response_model=ParseStatusResponse)
-async def parse_status(task_id: str):
-    task = parse_website_task.AsyncResult(task_id)
-    return {
-        "status": task.status,
-        "progress": task.info.get("progress", 0) if task.info else 0,
-        "result": task.result if task.ready() else None
-    }
-
-
-@router.get("/parse_status/")
 def parse_status(task_id: str):
     task_result = AsyncResult(task_id, app=celery_app)
     
-    if task_result.state == "PENDING":
-        return {"status": "pending", "progress": 0}
-    elif task_result.state == "PROGRESS":
-        return {
-            "status": "in progress",
-            "progress": task_result.info.get("progress", 0)
-        }
+    response_data = {
+        "status": task_result.state,
+        "progress": 0,
+        "result": None
+    }
+    
+    if task_result.state == "PROGRESS":
+        response_data["progress"] = task_result.info.get("progress", 0)
     elif task_result.state == "SUCCESS":
         result = task_result.result
-        if result.get("status") == "completed":
-            return {
-                "status": "completed",
-                "result": result["result"]
-            }
+        if isinstance(result, dict) and result.get("status") == "completed":
+            response_data["result"] = result.get("result")
+        elif isinstance(result, str):
+            response_data["result"] = result
         else:
-            return {
-                "status": "failed",
-                "error": result.get("error", "Unknown error")
-            }
-    return {"status": task_result.state}
+            response_data["result"] = str(result)
+    
+    return response_data

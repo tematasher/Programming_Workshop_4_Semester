@@ -20,10 +20,30 @@ class WebSocketCLI(cmd.Cmd):
     async def receive_messages(self):
         try:
             async for message in self.websocket:
-                data = json.loads(message)
-                print(f"\n[WS] {data}\n{self.prompt}", end="")
+                try:
+                    data = json.loads(message)
+                    # Обработка разных типов сообщений
+                    if data.get("status") == "STARTED":
+                        print(f"\n[!] Начато выполнение задачи: {data['task_id']}")
+                        self.task_id = data["task_id"]
+                    elif data.get("status") == "PROGRESS":
+                        print(f"\n[~] Прогресс: {data['progress']}% | {data['current_url']}")
+                    elif data.get("status") == "COMPLETED":
+                        print(f"\n[✓] Задача завершена! Страниц обработано: {data['total_pages']}")
+                        # Сохранение результата в файл
+                        with open(f"graph_{self.task_id}.graphml", "w") as f:
+                            f.write(data["result"])
+                        print(f"Граф сохранен в graph_{self.task_id}.graphml")
+                    else:
+                        print(f"\n[WS] {data}")
+                    
+                    print(f"{self.prompt}", end="", flush=True)
+                        
+                except json.JSONDecodeError:
+                    print(f"\n[!] Получено невалидное JSON-сообщение: {message}")
+    
         except websockets.exceptions.ConnectionClosed:
-            print("\nConnection closed by server")
+            print("\n[!] Соединение с сервером закрыто")
             self.running = False
     
 
