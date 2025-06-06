@@ -1,4 +1,7 @@
+import os
+from pathlib import Path
 from pydantic_settings import BaseSettings
+
 
 class Settings(BaseSettings):
     SECRET_KEY: str
@@ -7,9 +10,13 @@ class Settings(BaseSettings):
     SQLALCHEMY_DATABASE_URL: str = "sqlite:///./sql_app.db"
     REDIS_URL: str = "redis://localhost:6379/0"
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
+    REDISLITE_PATH: str = str(Path(__file__).parent.parent / "redis.db")
+
 
     class Config:
         env_file = ".env"
+        extra = 'ignore'
+
 
 settings = Settings()
